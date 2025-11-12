@@ -14,6 +14,13 @@ contract Example {
         uint256 b;
     }
 
+    /// @custom:storage-location erc7201:example.with.following.comment
+    // some comment
+    struct StorageWithComment {
+        uint256 a;
+        uint256 b;
+    }
+
     /// @notice some natspec
     function foo() public {}
 
@@ -76,7 +83,9 @@ contract Example {
 }
 
 contract HasFunction {
-  constructor(uint) {}
+  /// @param myInt an integer
+  constructor(uint myInt) {}
+
   function foo() pure public returns (uint) {}
 }
 
@@ -211,7 +220,20 @@ contract UsesAddress {
 
 contract HasFunctionWithRequiredReturn {
     struct S { uint x; }
-    function foo(S calldata s) internal pure returns (S calldata) {
+    modifier myModifier() {
+        _;
+    }
+    function foo(S calldata s) internal pure myModifier returns (S calldata) {
+        return s;
+    }
+}
+
+library LibWithRequiredReturn {
+    struct S { uint x; }
+    modifier myModifier() {
+        _;
+    }
+    function foo(S calldata s) myModifier internal pure returns (S calldata) {
         return s;
     }
 }
@@ -231,6 +253,13 @@ function hasMultipleReturns() pure returns (uint, uint) {
 function hasMultipleNamedReturns() pure returns (uint a, uint b) {
 }
 
+/**
+ * @param a first
+ * @param b second
+ */
+function hasReturnsDocumentedAsParams() pure returns (uint a, uint b) {
+}
+
 contract HasNatSpecWithMultipleReturns {
     /**
      * @return uint 1
@@ -245,4 +274,89 @@ contract HasNatSpecWithMultipleReturns {
      */
     function hasMultipleNamedReturnsInContract() public pure returns (uint a, uint b) {
     }
+
+    /**
+     * @param a first
+     * @param b second
+     */
+    function hasReturnsDocumentedAsParamsInContract() public pure returns (uint a, uint b) {
+    }
+}
+
+interface IHasExternalViewFunction {
+    function foo() external view returns (uint256);
+}
+
+contract HasExternalViewFunction is IHasExternalViewFunction {
+    // This generates a getter function that conforms to the interface
+    uint256 public foo;
+
+    // References a selector in an interface
+    bytes4 constant USING_INTERFACE_FUNCTION_SELECTOR = IHasExternalViewFunction.foo.selector;
+
+    // References a getter generated for a public variable
+    bytes4 immutable IMMUTABLE_USING_GETTER = this.foo.selector;
+}
+
+contract DeploysContractToImmutable {
+    HasFunction public immutable example = new HasFunction(1);
+}
+
+contract HasSpecialFunctions {
+    /// @param data call data
+    /// @return dataReturn returned data
+    fallback(bytes calldata data) external returns (bytes memory dataReturn) {
+        return data;
+    }
+
+    receive() external payable {
+    }
+
+    // Regular function but payable
+    function hasPayable() public payable {
+    }
+
+    bytes4 constant PAYABLE_SELECTOR = this.hasPayable.selector;
+}
+
+/// This is not considered a namespace according to ERC-7201 because the namespaced struct is outside of a contract.
+library LibraryWithNamespace {
+    /// @custom:storage-location erc7201:example.main
+    struct MainStorage {
+        uint256 x;
+        uint256 y;
+    }
+}
+
+interface InterfaceWithNamespace {
+    /// @custom:storage-location erc7201:example.main
+    struct MainStorage {
+        uint256 x;
+        uint256 y;
+    }
+}
+
+interface IHasConstantGetter {
+  function a() external view returns (bytes32);
+}
+
+contract HasConstantGetter is IHasConstantGetter {
+  bytes32 public override constant a = bytes32("foo");
+}
+
+abstract contract AbstractHasConstantGetter {
+  function a() virtual external pure returns (bytes32) {
+    // Virtual with default implementation
+    return bytes32("foo");
+  }
+}
+
+contract HasConstantGetterOverride is AbstractHasConstantGetter {
+  bytes32 public override constant a = bytes32("foo");
+}
+
+contract HasFunctionOverride is AbstractHasConstantGetter {
+  function a() override virtual external pure returns (bytes32) {
+    return bytes32("foo2");
+  }
 }

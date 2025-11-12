@@ -1,4 +1,4 @@
-import { SourceCodeLicense } from '@openzeppelin/defender-sdk-deploy-client';
+import { DeployMetadata, SourceCodeLicense } from '@openzeppelin/defender-sdk-deploy-client';
 import {
   DeployOpts,
   ProxyKindOption,
@@ -6,7 +6,23 @@ import {
   ValidationOptions,
   withValidationDefaults,
 } from '@openzeppelin/upgrades-core';
-import { Overrides } from 'ethers';
+import { ContractFactory, Overrides } from 'ethers';
+import { EthersOrDefenderDeployment } from './deploy';
+
+/**
+ * Options for customizing the factory or deploy functions
+ */
+export type DeployFactoryOpts = {
+  /**
+   * Allows to customize the ethers ContractFactory of the proxy to deploy, instead of using the ones defined in utils/factories.ts
+   */
+  proxyFactory?: ContractFactory;
+
+  /**
+   * Allows to customize the deploy function used instead of utils/deploy.ts:deploy
+   */
+  deployFunction?: () => Promise<EthersOrDefenderDeployment>;
+};
 
 /**
  * Options for functions that can deploy an implementation contract.
@@ -67,6 +83,7 @@ export type DefenderDeployOptions = DefenderDeploy & {
   createFactoryAddress?: string;
   licenseType?: SourceCodeLicense;
   skipLicenseType?: boolean;
+  metadata?: DeployMetadata;
 };
 
 /**
@@ -105,10 +122,16 @@ export type EthersDeployOptions = {
 
 export type InitialOwner = {
   initialOwner?: string;
+
+  /**
+   * Skips checking the `initialOwner` option when deploying a transparent proxy.
+   */
+  unsafeSkipProxyAdminCheck?: boolean;
 };
 
 export type DeployBeaconProxyOptions = EthersDeployOptions &
   DeployOpts &
+  DeployFactoryOpts &
   ProxyKindOption &
   Initializer &
   DefenderDeployOptions &
@@ -124,6 +147,7 @@ export type DeployContractOptions = Omit<StandaloneOptions, 'txOverrides'> & // 
     unsafeAllowDeployContract?: boolean;
   } & SafeGlobalDeployOptions;
 export type DeployProxyOptions = StandaloneOptions &
+  DeployFactoryOpts &
   Initializer &
   InitialOwner &
   DefenderDeployOptions &

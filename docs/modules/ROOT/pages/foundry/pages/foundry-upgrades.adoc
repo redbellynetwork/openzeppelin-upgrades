@@ -49,13 +49,39 @@ Set the following in `remappings.txt`:
 
 NOTE: Use `LegacyUpgrades.sol` instead of `Upgrades.sol` to upgrade existing deployments that were created with OpenZeppelin Contracts v4.
 
+=== Optional: Alternative installation methods
+
+==== NPM
+
+Follow the steps above, but instead of running `forge install OpenZeppelin/openzeppelin-foundry-upgrades`, use this command instead:
+[source,console]
+----
+npm install @openzeppelin/foundry-upgrades
+----
+
+Then add the following additional line to `remappings.txt`, in addition to the ones described above:
+[source,console]
+----
+openzeppelin-foundry-upgrades/=node_modules/@openzeppelin/foundry-upgrades/src/
+----
+
+==== Soldeer
+
+Follow the steps above, but instead of running `forge install OpenZeppelin/openzeppelin-foundry-upgrades`, use one of the install commands described in https://soldeer.xyz/project/openzeppelin-foundry-upgrades
+
+Then add the following additional line to `remappings.txt`, in addition to the ones described above (replace `0.3.6` with the version of the plugin that you installed):
+[source,console]
+----
+openzeppelin-foundry-upgrades/=dependencies/openzeppelin-foundry-upgrades-0.3.6/src/
+----
+
 == Foundry Requirements
 
-This library requires https://github.com/foundry-rs/forge-std[forge-std] version 1.8.0 or higher.
+This library requires https://github.com/foundry-rs/forge-std[forge-std] version 1.9.5 or higher.
 
 == Before Running
 
-This library uses the https://docs.openzeppelin.com/upgrades-plugins/1.x/api-core[OpenZeppelin Upgrades CLI] for upgrade safety validations, which are run by default during deployments and upgrades.
+This library uses the https://docs.openzeppelin.com/upgrades-plugins/api-core[OpenZeppelin Upgrades CLI] for upgrade safety validations, which are run by default during deployments and upgrades.
 
 If you want to be able to run upgrade safety validations, the following are needed:
 
@@ -73,7 +99,7 @@ extra_output = ["storageLayout"]
 ----
 
 [start=3]
-3. If you are upgrading your contract from a previous version, add the `@custom:oz-upgrades-from <reference>` annotation to the new version of your contract according to https://docs.openzeppelin.com/upgrades-plugins/1.x/api-core#define-reference-contracts[Define Reference Contracts] or specify the `referenceContract` option when calling the library's functions.
+3. If you are upgrading your contract from a previous version, add the `@custom:oz-upgrades-from <reference>` annotation to the new version of your contract according to https://docs.openzeppelin.com/upgrades-plugins/api-core#define-reference-contracts[Define Reference Contracts] or specify the `referenceContract` option when calling the library's functions.
 
 4. Run `forge clean` before running your Foundry script or tests, or include the `--force` option when running `forge script` or `forge test`.
 
@@ -133,9 +159,11 @@ import {MyToken} from "src/MyToken.sol";
 
 Then call functions from the imported library to run validations, deployments, or upgrades.
 
-=== Examples
+== Examples
 
 The following examples assume you are using OpenZeppelin Contracts v5 and want to run upgrade safety validations.
+
+=== Deploy a proxy
 
 Deploy a UUPS proxy:
 [source,solidity]
@@ -156,12 +184,27 @@ address proxy = Upgrades.deployTransparentProxy(
 );
 ----
 
+Deploy an upgradeable beacon and a beacon proxy:
+[source,solidity]
+----
+address beacon = Upgrades.deployBeacon("MyContract.sol", INITIAL_OWNER_ADDRESS_FOR_BEACON);
+
+address proxy = Upgrades.deployBeaconProxy(
+    beacon,
+    abi.encodeCall(MyContract.initialize, ("arguments for the initialize function"))
+);
+----
+
+=== Use your contract
+
 Call your contract's functions as normal, but remember to always use the proxy address:
 [source,solidity]
 ----
 MyContract instance = MyContract(proxy);
 instance.myFunction();
 ----
+
+=== Upgrade a proxy or beacon
 
 Upgrade a transparent or UUPS proxy and call an arbitrary function (such as a reinitializer) during the upgrade process:
 [source,solidity]
@@ -183,7 +226,13 @@ Upgrades.upgradeProxy(
 );
 ----
 
-WARNING: When upgrading a proxy or beacon, ensure that the new contract either has its `@custom:oz-upgrades-from <reference>` annotation set to the current implementation contract used by the proxy or beacon, or set it with the `referenceContract` option, for example:
+Upgrade a beacon:
+[source,solidity]
+----
+Upgrades.upgradeBeacon(beacon, "MyContractV2.sol");
+----
+
+WARNING: When upgrading a proxy or beacon, ensure that the new contract either has its `@custom:oz-upgrades-from <reference>` annotation set to the name of the old implementation contract used by the proxy or beacon, or set it with the `referenceContract` option, for example:
 [source,solidity]
 ----
 Options memory opts;
@@ -192,33 +241,22 @@ Upgrades.upgradeProxy(proxy, "MyContractV2.sol", "", opts);
 // or Upgrades.upgradeBeacon(beacon, "MyContractV2.sol", opts);
 ----
 
-Deploy an upgradeable beacon:
+TIP: If possible, keep the old version of the implementation contract's source code somewhere in your project to use as a reference as above. This requires the new version to be in a different directory, Solidity file, or using a different contract name. Otherwise, if you want to use the same directory and name for the new version, keep the build info directory from the previous deployment (or build it from an older branch of your project repository) and reference it as follows:
 [source,solidity]
 ----
-address beacon = Upgrades.deployBeacon("MyContract.sol", INITIAL_OWNER_ADDRESS_FOR_BEACON);
+Options memory opts;
+opts.referenceBuildInfoDir = "/old-builds/build-info-v1";
+opts.referenceContract = "build-info-v1:MyContract";
+Upgrades.upgradeProxy(proxy, "MyContract.sol", "", opts);
+// or Upgrades.upgradeBeacon(beacon, "MyContract.sol", opts);
 ----
 
-Deploy a beacon proxy:
-[source,solidity]
-----
-address proxy = Upgrades.deployBeaconProxy(
-    beacon,
-    abi.encodeCall(MyContract.initialize, ("arguments for the initialize function"))
-);
-----
-
-Upgrade a beacon:
-[source,solidity]
-----
-Upgrades.upgradeBeacon(beacon, "MyContractV2.sol");
-----
-
-=== Coverage Testing
+== Coverage Testing
 
 To enable code coverage reports with `forge coverage`, use the following deployment pattern in your tests: instantiate your implementation contracts directly and use the `UnsafeUpgrades` library. For example:
 ```solidity
 address implementation = address(new MyContract());
-address proxy = Upgrades.deployUUPSProxy(
+address proxy = UnsafeUpgrades.deployUUPSProxy(
     implementation,
     abi.encodeCall(MyContract.initialize, ("arguments for the initialize function"))
 );
@@ -226,13 +264,17 @@ address proxy = Upgrades.deployUUPSProxy(
 
 WARNING: `UnsafeUpgrades` is not recommended for use in Forge scripts. It does not validate whether your contracts are upgrade safe or whether new implementations are compatible with previous ones. Ensure you run validations before any actual deployments or upgrades, such as by using the `Upgrades` library in scripts.
 
-=== Deploying and Verifying
+== Deploying and Verifying
 
-Run your script with `forge script` to broadcast and deploy. See Foundry's https://book.getfoundry.sh/tutorials/solidity-scripting[Solidity Scripting] guide.
+Run your script with `forge script` to broadcast and deploy. See Foundry's https://book.getfoundry.sh/guides/scripting-with-solidity[Solidity Scripting] guide.
 
 IMPORTANT: Include the `--sender <ADDRESS>` flag for the `forge script` command when performing upgrades, specifying an address that owns the proxy or proxy admin. Otherwise, `OwnableUnauthorizedAccount` errors will occur.
 
 NOTE: Include the `--verify` flag for the `forge script` command if you want to verify source code such as on Etherscan. This will verify your implementation contracts along with any proxy contracts as part of the deployment.
+
+== Usage with Defender
+
+If you are using OpenZeppelin Defender, see xref:foundry-defender.adoc[OpenZeppelin Defender with Foundry] for how to use it for deployments.
 
 == API
 

@@ -23,6 +23,8 @@ import { getAnnotationArgs as getSupportedAnnotationArgs, getDocumentation } fro
 import { getStorageLocationAnnotation, isNamespaceSupported } from '../storage/namespace';
 import { UpgradesError } from '../error';
 import { assertUnreachable } from '../utils/assert';
+import { logWarning } from '../utils/log';
+import { getInitializerExceptions } from './run/initializer';
 
 export type ValidationRunData = Record<string, ContractValidation>;
 
@@ -49,13 +51,20 @@ export const errorKinds = [
   'selfdestruct',
   'missing-public-upgradeto',
   'internal-function-storage',
+  'missing-initializer',
+  'missing-initializer-call',
+  'duplicate-initializer-call',
+  'incorrect-initializer-order',
 ] as const;
+
+export const convertToWarnings: (typeof errorKinds)[number][] = ['incorrect-initializer-order'] as const;
 
 export type ValidationError =
   | ValidationErrorConstructor
   | ValidationErrorOpcode
   | ValidationErrorWithName
-  | ValidationErrorUpgradeability;
+  | ValidationErrorUpgradeability
+  | ValidationExceptionInitializer;
 
 interface ValidationErrorBase {
   src: string;
@@ -72,6 +81,33 @@ interface ValidationErrorWithName extends ValidationErrorBase {
     | 'enum-definition'
     | 'internal-function-storage';
 }
+
+interface ValidationErrorMissingInitializer extends ValidationErrorBase {
+  kind: 'missing-initializer';
+}
+
+interface ValidationErrorMissingInitializerCall extends ValidationErrorBase {
+  kind: 'missing-initializer-call';
+  parentContracts: string[];
+}
+
+interface ValidationErrorDuplicateInitializerCall extends ValidationErrorBase {
+  kind: 'duplicate-initializer-call';
+  parentInitializer: string;
+  parentContract: string;
+}
+
+interface ValidationWarningIncorrectInitializerOrder extends ValidationErrorBase {
+  kind: 'incorrect-initializer-order';
+  expectedLinearization: string[];
+  foundOrder: string[];
+}
+
+export type ValidationExceptionInitializer =
+  | ValidationErrorMissingInitializer
+  | ValidationErrorMissingInitializerCall
+  | ValidationErrorDuplicateInitializerCall
+  | ValidationWarningIncorrectInitializerOrder;
 
 interface ValidationErrorConstructor extends ValidationErrorBase {
   kind: 'constructor';
@@ -124,7 +160,7 @@ function skipCheckReachable(error: string, node: Node): boolean {
   return getAllowed(node, true).includes(error);
 }
 
-function skipCheck(error: string, node: Node): boolean {
+export function skipCheck(error: ValidationError['kind'], node: Node): boolean {
   // skip both allow and allow-reachable errors in the lexical scope
   return getAllowed(node, false).includes(error) || getAllowed(node, true).includes(error);
 }
@@ -208,6 +244,7 @@ export function validate(
           // https://github.com/OpenZeppelin/openzeppelin-upgrades/issues/52
           ...getLinkingErrors(contractDef, bytecode),
           ...getInternalFunctionStorageErrors(contractDef, deref, decodeSrc),
+          ...getInitializerExceptions(contractDef, deref, decodeSrc),
         ];
 
         validation[key].layout = extractStorageLayout(
@@ -267,14 +304,33 @@ function checkNamespaceSolidityVersion(source: string, solcVersion?: string, sol
 function checkNamespacesOutsideContract(source: string, solcOutput: SolcOutput, decodeSrc: SrcDecoder) {
   for (const node of solcOutput.sources[source].ast.nodes) {
     if (isNodeType('StructDefinition', node)) {
-      const storageLocation = getStorageLocationAnnotation(node);
-      if (storageLocation !== undefined) {
-        throw new UpgradesError(
-          `${decodeSrc(node)}: Namespace struct ${node.name} is defined outside of a contract`,
-          () =>
-            `Structs with the @custom:storage-location annotation must be defined within a contract. Move the struct definition into a contract, or remove the annotation if the struct is not used for namespaced storage.`,
-        );
+      // Namespace struct outside contract - error
+      assertNotNamespace(node, decodeSrc, true);
+    } else if (isNodeType('ContractDefinition', node) && node.contractKind === 'library') {
+      // Namespace struct in library - warning (don't give an error to avoid breaking changes, since this is quite common)
+      for (const child of node.nodes) {
+        if (isNodeType('StructDefinition', child)) {
+          assertNotNamespace(child, decodeSrc, false);
+        }
       }
+    }
+  }
+}
+
+function assertNotNamespace(node: StructDefinition, decodeSrc: SrcDecoder, strict: boolean) {
+  const storageLocation = getStorageLocationAnnotation(node);
+  if (storageLocation !== undefined) {
+    const msg = `${decodeSrc(node)}: Namespace struct ${node.name} is defined outside of a contract`;
+    if (strict) {
+      throw new UpgradesError(
+        msg,
+        () =>
+          `Structs with the @custom:storage-location annotation must be defined within a contract. Move the struct definition into a contract, or remove the annotation if the struct is not used for namespaced storage.`,
+      );
+    } else {
+      logWarning(msg, [
+        'Structs with the @custom:storage-location annotation must be defined within a contract, otherwise they are not included in storage layout validations. Move the struct definition into a contract, or remove the annotation if the struct is not used for namespaced storage.',
+      ]);
     }
   }
 }
@@ -456,7 +512,10 @@ function setCachedOpcodes(key: number, scope: string, cache: OpcodeCache, errors
   }
 }
 
-function tryDerefFunction(deref: ASTDereferencer, referencedDeclaration: number): FunctionDefinition | undefined {
+export function tryDerefFunction(
+  deref: ASTDereferencer,
+  referencedDeclaration: number,
+): FunctionDefinition | undefined {
   try {
     return deref(['FunctionDefinition'], referencedDeclaration);
   } catch (e: any) {

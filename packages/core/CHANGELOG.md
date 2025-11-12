@@ -1,5 +1,85 @@
 # Changelog
 
+
+## 1.44.2 (2025-11-03)
+
+- Add Celo Sepolia network to manifest file names. ([#1189](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1189))
+
+## 1.44.1 (2025-05-20)
+
+- Fix `Missing initializer calls` error when initializer name ends with `_unchained` ([#1161](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1161))
+
+## 1.44.0 (2025-04-14)
+
+- Validate Solidity custom storage layouts, use proxies from OpenZeppelin Contracts 5.3.0. ([#1144](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1144))
+
+## 1.43.0 (2025-04-11)
+
+- Add Sonic network to manifest file names. ([#1146](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1146))
+- Support annotation to validate functions as initializers. ([#1148](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1148))
+
+## 1.42.2 (2025-03-19)
+
+- Fix `ASTDereferencerError` for additional scenario when validating initializers. ([#1137](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1137))
+
+## 1.42.1 (2025-01-24)
+
+- Fix `ASTDereferencerError` when validating initializers. ([#1118](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1118))
+
+## 1.42.0 (2025-01-23)
+
+- Update dependencies. ([#1096](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1096))
+- Detect issues in parent initializer calls. ([#1095](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1095))
+
+## 1.41.0 (2024-11-25)
+
+- Update Slang dependency to 0.18.3. ([#1102](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1102))
+  - Improves reliability of Hardhat compilation step for namespaced storage layout validations when using Solidity versions 0.8.27 and 0.8.28.
+
+## 1.40.0 (2024-10-10)
+
+- Fix Hardhat compile error when overriding interface functions with public constant variables. ([#1091](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1091))
+- Support ignoring Hardhat compile errors when extracting detailed namespaced storage layouts for validations. ([#1090](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1090))
+
+## 1.39.0 (2024-10-02)
+
+- Fix Hardhat compile error when library or interface has struct with namespace annotation. ([#1086](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1086))
+- Log warning if library contains namespace annotation. ([#1086](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1086))
+
+> **Note**
+> Namespaces should be defined in contracts according to [ERC-7201: Namespaced Storage Layouts](https://eips.ethereum.org/EIPS/eip-7201). Structs with namespace annotations defined in libraries or interfaces outside of a contract's inheritance are not included in storage layout validations.
+
+## 1.38.0 (2024-09-23)
+
+- Supports checking to ensure `initialOwner` is not a ProxyAdmin contract when deploying a transparent proxy from Hardhat. ([#1083](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1083))
+
+## 1.37.1 (2024-09-09)
+
+- Fix Hardhat compile error when using solc version `0.8.27`. ([#1075](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1075))
+
+## 1.37.0 (2024-08-28)
+
+- **Breaking change**: CLI: Disallow self-references for storage layout validations. ([#1067](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1067))
+- CLI: Support `--exclude` option. ([#1065](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1065))
+
+## 1.36.0 (2024-08-21)
+
+- Update dependency on Slang. ([#1059](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1059))
+- CLI: Support `--referenceBuildInfoDirs` option. ([#1062](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1062))
+
+## 1.35.1 (2024-08-13)
+
+- Fix Hardhat compile error when `fallback` or `receive` functions are present. ([#1060](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1060))
+
+## 1.35.0 (2024-07-31)
+
+- Fix Hardhat compile error when public variables are used to implement interface functions. ([#1055](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1055))
+- Remove non-struct NatSpec from Hardhat compilation step for namespaced storage layout validations. ([#1051](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1051))
+
+## 1.34.4 (2024-07-22)
+
+- Fix Hardhat compile error when return parameter names are documented as param. ([#1050](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1050))
+
 ## 1.34.3 (2024-07-19)
 
 - Fix Hardhat compile error when multiple return parameters are documented. ([#1048](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/1048))
@@ -308,6 +388,7 @@
 - Fix parsing of NatSpec `@custom:oz-upgrades-unsafe-allow` when included in a `/**`-style comment.
 
 ## 1.6.0 (2021-04-14)
+
 - Add `unsafeAllow` as a new field in `ValidationOptions`, which can be used as a manual override to silence any type of validation error. For example, `opts = { unsafeAllow: ['external-library-linking', 'delegatecall'] }` will silence the corresponding checks. ([#320](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/320))
 - Custom NatSpec comments can disable error checks directly from the Solidity code. See `core/contracts/test/ValidationNatspec.sol` for example usage of these NatSpec comments. Note: this requires Solidity >=0.8.2. ([#320](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/320))
 - Fix a bug with library placeholders when hashing contract source code. ([#320](https://github.com/OpenZeppelin/openzeppelin-upgrades/pull/320))

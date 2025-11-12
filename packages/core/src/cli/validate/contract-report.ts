@@ -4,7 +4,6 @@ import {
   getContractVersion,
   getStorageLayout,
   ValidationOptions,
-  withValidationDefaults,
   Version,
   ValidationData,
   ValidateUpgradeSafetyOptions,
@@ -17,7 +16,10 @@ import { getUpgradeabilityAssessment } from './upgradeability-assessment';
 import { SourceContract } from './validations';
 import { LayoutCompatibilityReport } from '../../storage/report';
 import { indent } from '../../utils/indent';
-import { SpecifiedContracts } from './validate-upgrade-safety';
+import { BuildInfoDictionary, SpecifiedContracts } from './validate-upgrade-safety';
+import { minimatch } from 'minimatch';
+import { ValidateCommandError } from './error';
+import { defaultExclude } from './default-exclude';
 
 /**
  * Report for an upgradeable contract.
@@ -29,7 +31,16 @@ export class UpgradeableContractReport implements Report {
     readonly reference: string | undefined,
     readonly standaloneReport: UpgradeableContractErrorReport,
     readonly storageLayoutReport: LayoutCompatibilityReport | undefined,
-  ) {}
+  ) {
+    if (reference === contract) {
+      throw new ValidateCommandError(
+        `The contract ${contract} must not use itself as a reference for storage layout comparisons.`,
+        () => `\
+If this is the first version of your contract, do not specify a reference.
+If this is a subsequent version, keep the previous version of the contract in another file and specify that as the reference, or specify a reference from another build info directory containing the previous version. If you do not have the previous version available, you can skip the storage layout check using the \`unsafeSkipStorageCheck\` option, which is a dangerous option meant to be used as a last resort.`,
+      );
+    }
+  }
 
   get ok(): boolean {
     return this.standaloneReport.ok && (this.storageLayoutReport === undefined || this.storageLayoutReport.ok);
@@ -58,29 +69,32 @@ export class UpgradeableContractReport implements Report {
 }
 
 /**
- * Gets upgradeble contract reports for the upgradeable contracts in the given set of source contracts.
+ * Gets upgradeble contract reports for the upgradeable contracts in the set of source contracts at dictionary key ''.
+ * Reference contracts can come from source contracts at the corresponding dictionary key.
  * Only contracts that are detected as upgradeable will be included in the reports.
  * Reports include upgradeable contracts regardless of whether they pass or fail upgrade safety checks.
  *
- * @param sourceContracts The source contracts to check, which must include all contracts that are referenced by the given contracts. Can also include non-upgradeable contracts, which will be ignored.
+ * @param buildInfoDictionary Dictionary of build info directories and the source contracts they contain.
  * @param opts The validation options.
  * @param specifiedContracts If provided, only the specified contract (upgrading from its reference contract) will be reported.
+ * @param exclude Exclude validations for contracts in source file paths that match any of the given glob patterns.
  * @returns The upgradeable contract reports.
  */
 export function getContractReports(
-  sourceContracts: SourceContract[],
+  buildInfoDictionary: BuildInfoDictionary,
   opts: Required<ValidateUpgradeSafetyOptions>,
   specifiedContracts?: SpecifiedContracts,
+  exclude?: string[],
 ) {
   const upgradeableContractReports: UpgradeableContractReport[] = [];
 
   const contractsToReport: SourceContract[] =
-    specifiedContracts !== undefined ? [specifiedContracts.contract] : sourceContracts;
+    specifiedContracts !== undefined ? [specifiedContracts.contract] : buildInfoDictionary[''];
 
   for (const sourceContract of contractsToReport) {
     const upgradeabilityAssessment = getUpgradeabilityAssessment(
       sourceContract,
-      sourceContracts,
+      buildInfoDictionary,
       specifiedContracts?.reference,
     );
     if (opts.requireReference && upgradeabilityAssessment.referenceContract === undefined) {
@@ -90,20 +104,43 @@ export function getContractReports(
     } else if (specifiedContracts !== undefined || upgradeabilityAssessment.upgradeable) {
       const reference = upgradeabilityAssessment.referenceContract;
       const kind = upgradeabilityAssessment.uups ? 'uups' : 'transparent';
-      const report = getUpgradeableContractReport(sourceContract, reference, { ...opts, kind: kind });
+      const report = getUpgradeableContractReport(sourceContract, reference, { ...opts, kind: kind }, exclude);
       if (report !== undefined) {
         upgradeableContractReports.push(report);
+      } else if (specifiedContracts !== undefined) {
+        // If there was no report for the specified contract, it was excluded or is abstract.
+        const userAction =
+          exclude !== undefined
+            ? `Ensure the contract is not abstract and is not excluded by the exclude option.`
+            : `Ensure the contract is not abstract.`;
+        throw new ValidateCommandError(
+          `No validation report found for contract ${specifiedContracts.contract.fullyQualifiedName}`,
+          () => userAction,
+        );
       }
     }
   }
+
   return upgradeableContractReports;
 }
 
+/**
+ * Gets a report for an upgradeable contract.
+ * Returns undefined if the contract is excluded or is abstract.
+ */
 function getUpgradeableContractReport(
   contract: SourceContract,
   referenceContract: SourceContract | undefined,
-  opts: ValidationOptions,
+  opts: Required<ValidationOptions>,
+  exclude?: string[],
 ): UpgradeableContractReport | undefined {
+  const excludeWithDefaults = defaultExclude.concat(exclude ?? []);
+
+  if (excludeWithDefaults.some(glob => minimatch(getPath(contract.fullyQualifiedName), glob))) {
+    debug('Excluding contract: ' + contract.fullyQualifiedName);
+    return undefined;
+  }
+
   let version;
   try {
     version = getContractVersion(contract.validationData, contract.fullyQualifiedName);
@@ -118,7 +155,7 @@ function getUpgradeableContractReport(
   }
 
   debug('Checking: ' + contract.fullyQualifiedName);
-  const standaloneReport = getStandaloneReport(contract.validationData, version, opts);
+  const standaloneReport = getStandaloneReport(contract.validationData, version, opts, excludeWithDefaults);
 
   let reference: string | undefined;
   let storageLayoutReport: LayoutCompatibilityReport | undefined;
@@ -129,8 +166,12 @@ function getUpgradeableContractReport(
     const referenceVersion = getContractVersion(referenceContract.validationData, referenceContract.fullyQualifiedName);
     const referenceLayout = getStorageLayout(referenceContract.validationData, referenceVersion);
 
-    reference = referenceContract.fullyQualifiedName;
-    storageLayoutReport = getStorageUpgradeReport(referenceLayout, layout, withValidationDefaults(opts));
+    if (referenceContract.buildInfoDirShortName !== contract.buildInfoDirShortName) {
+      reference = `${referenceContract.buildInfoDirShortName}:${referenceContract.fullyQualifiedName}`;
+    } else {
+      reference = referenceContract.fullyQualifiedName;
+    }
+    storageLayoutReport = getStorageUpgradeReport(referenceLayout, layout, opts);
   }
 
   return new UpgradeableContractReport(contract.fullyQualifiedName, reference, standaloneReport, storageLayoutReport);
@@ -139,8 +180,22 @@ function getUpgradeableContractReport(
 function getStandaloneReport(
   data: ValidationData,
   version: Version,
-  opts: ValidationOptions,
+  opts: Required<ValidationOptions>,
+  excludeWithDefaults: string[],
 ): UpgradeableContractErrorReport {
-  const errors = getErrors(data, version, withValidationDefaults(opts));
-  return new UpgradeableContractErrorReport(errors);
+  const allErrors = getErrors(data, version, opts);
+
+  const includeErrors = allErrors.filter(e => {
+    const shouldExclude = excludeWithDefaults.some(glob => minimatch(getPath(e.src), glob));
+    if (shouldExclude) {
+      debug('Excluding error: ' + e.src);
+    }
+    return !shouldExclude;
+  });
+
+  return new UpgradeableContractErrorReport(includeErrors);
+}
+
+function getPath(srcOrFullyQualifiedName: string): string {
+  return srcOrFullyQualifiedName.split(':')[0];
 }
