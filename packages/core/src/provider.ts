@@ -134,6 +134,7 @@ export const networkNames: { [chainId in number]?: string } = Object.freeze({
   56: 'bsc',
   97: 'bsc-testnet',
   137: 'polygon',
+  146: 'sonic',
   420: 'optimism-goerli',
   8453: 'base',
   17000: 'holesky',
@@ -146,6 +147,7 @@ export const networkNames: { [chainId in number]?: string } = Object.freeze({
   44787: 'celo-alfajores',
   80001: 'polygon-mumbai',
   84532: 'base-sepolia',
+  11142220: 'celo-sepolia',
   11155111: 'sepolia',
   11155420: 'op-sepolia',
 });

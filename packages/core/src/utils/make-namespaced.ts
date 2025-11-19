@@ -2,8 +2,8 @@ import { isNodeType } from 'solidity-ast/utils';
 import { Node } from 'solidity-ast/node';
 import { SolcInput, SolcOutput } from '../solc-api';
 import { getStorageLocationAnnotation } from '../storage/namespace';
-import { assert } from './assert';
-import { FunctionDefinition } from 'solidity-ast';
+import { assert, assertUnreachable } from './assert';
+import { ContractDefinition, FunctionDefinition, VariableDeclaration } from 'solidity-ast';
 
 const OUTPUT_SELECTION = {
   '*': {
@@ -18,17 +18,26 @@ const OUTPUT_SELECTION = {
  *
  * This makes the following modifications to the input:
  * - Adds a state variable for each namespaced struct definition
- * - For each contract, for all node types that are not needed for storage layout or may reference deleted functions and constructors, converts them to dummy enums with random id
+ * - For each contract, for all node types that are not needed for storage layout or may call functions and constructors, converts them to dummy enums with random id
+ * - Mark contracts as abstract, since state variables are converted to dummy enums which would not generate public getters for inherited interface functions
  * - Converts all using for directives (at file level and in contracts) to dummy enums with random id (do not delete them to avoid orphaning possible NatSpec documentation)
- * - Converts all custom errors, free functions and constants (at file level) to dummy enums with the same name (do not delete them since they might be imported by other files)
+ * - Converts all custom errors and constants (at file level) to dummy enums with the same name (do not delete them since they might be imported by other files)
+ * - Replaces functions as follows:
+ *   - For regular function and free function, keep declarations since they may be referenced by constants (free functions may also be imported by other files). But simplify compilation as follows:
+ *     - Avoid having to initialize return parameters: convert function to virtual if possible, or convert return parameters to bools which can be default initialized.
+ *     - Delete modifiers
+ *     - Delete function bodies
+ *   - Constructors are not needed, since we removed anything that may call constructors. Convert to dummy enums to avoid orphaning possible NatSpec.
+ *   - Fallback and receive functions are not needed, since they don't have signatures. Convert to dummy enums to avoid orphaning possible NatSpec.
  *
  * Also sets the outputSelection to only include storageLayout and ast, since the other outputs are not needed.
  *
  * @param input The original solc input.
  * @param output The original solc output.
+ * @param _solcVersion The version of the solc compiler that was originally used to compile the input. This argument is no longer used and is kept for backwards compatibility.
  * @returns The modified solc input with storage layout that includes namespaced type information.
  */
-export function makeNamespacedInput(input: SolcInput, output: SolcOutput): SolcInput {
+export function makeNamespacedInput(input: SolcInput, output: SolcOutput, _solcVersion?: string): SolcInput {
   const modifiedSources: Record<string, { content?: string }> = {};
 
   for (const [sourcePath] of Object.entries(input.sources)) {
@@ -48,6 +57,17 @@ export function makeNamespacedInput(input: SolcInput, output: SolcOutput): SolcI
         case 'ContractDefinition': {
           const contractDef = node;
 
+          // Mark contracts as abstract, since state variables are converted to dummy enums
+          // which would not generate public getters for inherited interface functions
+          if (contractDef.contractKind === 'contract' && !contractDef.abstract) {
+            modifications.push(makeInsertBefore(contractDef, 'abstract '));
+          }
+
+          // Remove custom layout annotation
+          if (contractDef.storageLayout !== undefined) {
+            modifications.push(makeDelete(contractDef.storageLayout, orig));
+          }
+
           // Remove any calls to parent constructors from the inheritance list
           const inherits = contractDef.baseContracts;
           for (const inherit of inherits) {
@@ -61,7 +81,7 @@ export function makeNamespacedInput(input: SolcInput, output: SolcOutput): SolcI
           for (const contractNode of contractNodes) {
             switch (contractNode.nodeType) {
               case 'FunctionDefinition': {
-                replaceFunction(contractNode, orig, modifications);
+                replaceFunction(contractNode, orig, modifications, contractDef);
                 break;
               }
               case 'VariableDeclaration': {
@@ -80,6 +100,10 @@ export function makeNamespacedInput(input: SolcInput, output: SolcOutput): SolcI
                 break;
               }
               case 'StructDefinition': {
+                // Do not add state variable in a library or interface, since that is not allowed by Solidity
+                if (contractDef.contractKind !== 'contract') {
+                  continue;
+                }
                 const storageLocation = getStorageLocationAnnotation(contractNode);
                 if (storageLocation !== undefined) {
                   const structName = contractNode.name;
@@ -150,6 +174,73 @@ export function makeNamespacedInput(input: SolcInput, output: SolcOutput): SolcI
   return { ...input, sources: modifiedSources, settings: { ...input.settings, outputSelection: OUTPUT_SELECTION } };
 }
 
+/**
+ * Attempts to remove all NatSpec comments that do not precede a struct definition from the input source contents.
+ * Directly modifies the input source contents, and also returns the modified input.
+ *
+ * If the solc version is not supported by the parser, the original content is kept.
+ *
+ * @param solcInput Solc input.
+ * @param solcVersion The version of the solc compiler that was originally used to compile the input.
+ * @returns The modified solc input with NatSpec comments removed where they do not precede a struct definition.
+ */
+export async function trySanitizeNatSpec(solcInput: SolcInput, solcVersion: string): Promise<SolcInput> {
+  for (const [sourcePath, source] of Object.entries(solcInput.sources)) {
+    if (source.content !== undefined) {
+      solcInput.sources[sourcePath].content = await tryRemoveNonStructNatSpec(source.content, solcVersion);
+    }
+  }
+  return solcInput;
+}
+
+/**
+ * If Slang is supported for the current compiler version, use Slang to parse and remove all NatSpec comments
+ * that do not precede a struct definition and return the modified content.
+ *
+ * Otherwise, return the original content.
+ */
+async function tryRemoveNonStructNatSpec(origContent: string, solcVersion: string): Promise<string> {
+  if (solcVersion === undefined) {
+    return origContent;
+  }
+
+  const { Parser } = await import('@nomicfoundation/slang/parser');
+  if (!Parser.supportedVersions().includes(solcVersion)) {
+    return origContent;
+  }
+
+  const { TerminalKind, TerminalKindExtensions } = await import('@nomicfoundation/slang/cst');
+
+  const parser = Parser.create(solcVersion);
+  const parseOutput = parser.parse(Parser.rootKind(), origContent);
+  const cursor = parseOutput.createTreeCursor();
+
+  const natSpecRemovals: Modification[] = [];
+
+  while (
+    cursor.goToNextTerminalWithKinds([TerminalKind.MultiLineNatSpecComment, TerminalKind.SingleLineNatSpecComment])
+  ) {
+    // Lookahead to determine if the next non-trivia node is the struct keyword.
+    // If so, this NatSpec is part of the struct definition and should not be removed.
+    const lookaheadCursor = cursor.clone();
+    while (
+      lookaheadCursor.goToNextTerminal() &&
+      lookaheadCursor.node.isTerminalNode() &&
+      TerminalKindExtensions.isTrivia(lookaheadCursor.node.kind)
+    ) {
+      // skip over trivia nodes
+    }
+
+    if (lookaheadCursor.node.kind === TerminalKind.StructKeyword) {
+      continue;
+    }
+
+    natSpecRemovals.push(makeDeleteRange(cursor.textRange.start.utf8, cursor.textRange.end.utf8));
+  }
+
+  return getModifiedSource(Buffer.from(origContent, 'utf8'), natSpecRemovals);
+}
+
 interface Modification {
   start: number;
   end: number;
@@ -164,25 +255,82 @@ function toDummyEnumWithAstId(astId: number) {
   return `enum $astId_${astId}_${(Math.random() * 1e6).toFixed(0)} { dummy }`;
 }
 
-function replaceFunction(node: FunctionDefinition, orig: Buffer, modifications: Modification[]) {
-  if (node.kind === 'constructor') {
-    modifications.push(makeDelete(node, orig));
-  } else {
-    if (node.modifiers.length > 0) {
-      for (const modifier of node.modifiers) {
-        modifications.push(makeDelete(modifier, orig));
+function replaceFunction(
+  node: FunctionDefinition,
+  orig: Buffer,
+  modifications: Modification[],
+  contractDef?: ContractDefinition,
+) {
+  switch (node.kind) {
+    case 'freeFunction':
+    case 'function': {
+      let virtual = node.virtual;
+
+      if (
+        contractDef !== undefined &&
+        contractDef.contractKind === 'contract' &&
+        node.visibility !== 'private' &&
+        !virtual
+      ) {
+        assert(node.kind !== 'freeFunction');
+
+        // If this is a contract function and not private, it could possibly override an interface function.
+        // We don't want to change its return parameters because that might cause a mismatch with the interface.
+        // Simply convert the function to virtual (if not already)
+        modifications.push(makeInsertAfter(node.parameters, ' virtual '));
+        virtual = true;
       }
-    }
 
-    if (node.returnParameters.parameters.length > 0) {
-      modifications.push(
-        makeReplace(node.returnParameters, orig, `(${node.returnParameters.parameters.map(() => 'bool').join(',')})`),
-      );
-    }
+      if (node.modifiers.length > 0) {
+        // Delete modifiers
+        for (const modifier of node.modifiers) {
+          modifications.push(makeDelete(modifier, orig));
+        }
+      }
 
-    if (node.body) {
-      modifications.push(makeReplace(node.body, orig, '{}'));
+      if (node.body) {
+        // Delete body
+        if (virtual) {
+          modifications.push(makeReplace(node.body, orig, ';'));
+        } else {
+          // This is a non-virtual function with a body, so that means it is not an interface function.
+          assert(contractDef?.contractKind !== 'interface');
+          // Since all contract functions that are non-private were converted to virtual above, this cannot possibly override another function.
+          assert(!node.overrides);
+
+          // The remaining scenarios may mean this is a library function, free function, or private function.
+          // In any of these cases, we can convert the return parameters to bools so that they can be default initialized.
+          if (node.returnParameters.parameters.length > 0) {
+            modifications.push(
+              makeReplace(
+                node.returnParameters,
+                orig,
+                `(${node.returnParameters.parameters.map(param => toReturnParameterReplacement(param)).join(', ')})`,
+              ),
+            );
+          }
+          modifications.push(makeReplace(node.body, orig, '{}'));
+        }
+      }
+
+      break;
     }
+    case 'constructor':
+    case 'fallback':
+    case 'receive': {
+      modifications.push(makeReplace(node, orig, toDummyEnumWithAstId(node.id)));
+      break;
+    }
+    default:
+      return assertUnreachable(node.kind);
+  }
+}
+
+function toReturnParameterReplacement(param: VariableDeclaration) {
+  if (param.name.length > 0) {
+    return `bool ${param.name}`;
+  } else {
+    return 'bool';
   }
 }
 
@@ -196,6 +344,11 @@ function makeReplace(node: Node, orig: Buffer, text: string): Modification {
   // Replace is a delete and insert
   const { start, end } = makeDelete(node, orig);
   return { start, end, text };
+}
+
+function makeInsertBefore(node: Node, text: string): Modification {
+  const { start } = getPositions(node);
+  return { start: start, end: start, text };
 }
 
 function makeInsertAfter(node: Node, text: string): Modification {
@@ -215,7 +368,11 @@ function makeDelete(node: Node, orig: Buffer): Modification {
       end += 1;
     }
   }
-  return { start: positions.start, end };
+  return makeDeleteRange(positions.start, end);
+}
+
+function makeDeleteRange(start: number, end: number): Modification {
+  return { start, end };
 }
 
 function getModifiedSource(orig: Buffer, modifications: Modification[]): string {

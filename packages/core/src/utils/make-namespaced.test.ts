@@ -6,7 +6,7 @@ import {
   TASK_COMPILE_SOLIDITY_RUN_SOLCJS,
 } from 'hardhat/builtin-tasks/task-names';
 
-import { makeNamespacedInput } from './make-namespaced';
+import { makeNamespacedInput, trySanitizeNatSpec } from './make-namespaced';
 import { SolcBuild } from 'hardhat/types/builtin-tasks';
 import { SolcInput, SolcOutput } from '../solc-api';
 import { BuildInfo } from 'hardhat/types';
@@ -16,16 +16,29 @@ test('make namespaced input', async t => {
   await testMakeNamespaced(origBuildInfo, t, '0.8.20');
 });
 
+test('make namespaced input - keep all natspec', async t => {
+  const origBuildInfo = await artifacts.getBuildInfo('contracts/test/NamespacedToModifyImported.sol:Example');
+  await testMakeNamespaced(origBuildInfo, t, '0.8.20', true);
+});
+
 test('make namespaced input - solc 0.7', async t => {
   // The nameNamespacedInput function must work for different solc versions, since it is called before we check whether namespaces are used with solc >= 0.8.20
   const origBuildInfo = await artifacts.getBuildInfo('contracts/test/NamespacedToModify07.sol:HasFunction');
   await testMakeNamespaced(origBuildInfo, t, '0.7.6');
 });
 
+test('make namespaced input - custom layout', async t => {
+  const origBuildInfo = await artifacts.getBuildInfo(
+    'contracts/test/NamespacedToModifyCustomLayout.sol:ExampleCustomLayout',
+  );
+  await testMakeNamespaced(origBuildInfo, t, '0.8.29');
+});
+
 async function testMakeNamespaced(
   origBuildInfo: BuildInfo | undefined,
   t: ExecutionContext<unknown>,
   solcVersion: string,
+  keepAllNatSpec = false,
 ) {
   if (origBuildInfo === undefined) {
     throw new Error('Build info not found');
@@ -34,7 +47,10 @@ async function testMakeNamespaced(
   // Inefficient, but we want to test that we don't actually modify the original input object
   const origInput = JSON.parse(JSON.stringify(origBuildInfo.input));
 
-  const modifiedInput = makeNamespacedInput(origBuildInfo.input, origBuildInfo.output);
+  let modifiedInput = makeNamespacedInput(origBuildInfo.input, origBuildInfo.output, origBuildInfo.solcVersion);
+  if (!keepAllNatSpec) {
+    modifiedInput = await trySanitizeNatSpec(modifiedInput, origBuildInfo.solcVersion);
+  }
 
   // Run hardhat compile on the modified input and make sure it has no errors
   const modifiedOutput = await hardhatCompile(modifiedInput, solcVersion);
@@ -53,6 +69,7 @@ function normalizeIdentifiers(input: SolcInput): void {
       source.content = source.content
         .replace(/\$MainStorage_\d{1,6}/g, '$MainStorage_random')
         .replace(/\$SecondaryStorage_\d{1,6}/g, '$SecondaryStorage_random')
+        .replace(/\$StorageWithComment_\d{1,6}/g, '$StorageWithComment_random')
         .replace(/\$astId_\d+_\d{1,6}/g, '$astId_id_random');
     }
   }
