@@ -1,0 +1,18 @@
+name: openzeppelin-upgrades
+id: ari:cloud:compass:1794ff3d-579e-455b-ae19-07f3651d7bb2:component/8f784f5d-165e-48a8-800f-432089cd8105/896f796a-b5f1-415e-9a05-cb1433bad870
+description: Plugins for Hardhat and Foundry to deploy and manage upgradeable contracts on Ethereum.
+configVersion: 1
+typeId: LIBRARY
+ownerId: ari:cloud:identity::team/05568331-81cd-4b26-abac-a81617df8bea
+fields:
+  tier: 4
+links:
+  - name: null
+    type: REPOSITORY
+    url: https://github.com/redbellynetwork/openzeppelin-upgrades
+relationships:
+  DEPENDS_ON: []
+labels:
+  - language:typescript
+  - source:github
+customFields: null
