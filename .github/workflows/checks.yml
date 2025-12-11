@@ -114,4 +114,26 @@ jobs:
       if: steps.create_pull_request.outcome == 'failure'
       run: |
         git push origin --delete $BRANCH_NAME
-               
+
+  report-build-success:
+    needs: [lint, tests, coverage, update-foundry-submodule-docs]
+    if: success() && github.event_name == 'push'
+    uses: redbellynetwork/ci-cd-workflows/.github/workflows/compass-reporter.yml@v1
+    with:
+      metricType: branch-status
+      metricValue: 1
+    secrets:
+      JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+  report-build-failure:
+    needs: [lint, tests, coverage, update-foundry-submodule-docs]
+    if: failure() && github.event_name == 'push'
+    uses: redbellynetwork/ci-cd-workflows/.github/workflows/compass-reporter.yml@v1
+    with:
+      metricType: branch-status
+      metricValue: 0
+    secrets:
+      JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
