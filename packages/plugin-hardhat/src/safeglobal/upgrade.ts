@@ -127,7 +127,7 @@ export async function getNullTransactionResponse(hre: HardhatRuntimeEnvironment)
       maxFeePerGas: BigInt(0),
       signature: new hre.ethers.Signature('', '', '', 28),
       accessList: [],
-      authorizationList:[]
+      authorizationList: [],
     },
     hre.ethers.provider,
   );

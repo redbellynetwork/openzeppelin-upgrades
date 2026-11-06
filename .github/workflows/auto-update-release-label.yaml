@@ -1,0 +1,14 @@
+name: Auto Update Release Label
+
+on:
+  pull_request:
+    types: [opened, labeled, unlabeled, synchronize, reopened]
+
+jobs:
+  auto-update-release-label:
+    permissions:
+      pull-requests: write
+      issues: write
+    uses: redbellynetwork/ci-cd-workflows/.github/workflows/auto-update-release-label.yml@v1
+    secrets:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}

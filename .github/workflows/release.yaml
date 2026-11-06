@@ -1,0 +1,26 @@
+name: Release @redbellynetwork/hardhat-upgrades
+
+# A push to master publishes X.Y.Z under `latest`. A push to the pre-master staging branch
+# publishes X.Y.Z-pre.N under the `pre` dist-tag, where X.Y.Z is what the next stable release
+# would get, so a consumer can pin it before pre-master is promoted to master. The bump comes from
+# the merged PR's release:* label. This replaced changesets and the manual Publish run (GRT-4162).
+#
+# The shared workflow reads the version base from vX.Y.Z tags and from the registry entry named by
+# the ROOT package.json, which here is the workspace root, not the plugin. So the base is the tags:
+# v1.0.0 and v1.0.1 mark the commits those versions were published from.
+on:
+  push:
+    branches: [master, pre-master]
+
+# No concurrency group: a group keeps one pending run and cancels the one before it, and each run
+# takes its bump label from its own merge commit, so a cancelled run's release:minor would be lost.
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  create-release-package:
+    uses: redbellynetwork/ci-cd-workflows/.github/workflows/release-npm-package.yml@v1
+    with:
+      prerelease: ${{ startsWith(github.ref_name, 'pre-') }}
+    secrets:
+      GIT_ACTIONS_TOKEN: ${{ secrets.GIT_ACTIONS_TOKEN }}

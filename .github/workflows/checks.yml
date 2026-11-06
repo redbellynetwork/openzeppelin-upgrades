@@ -2,7 +2,7 @@ name: checks
 
 on:
   push:
-    branches: [master]
+    branches: [master, pre-master]
   pull_request: {}
   repository_dispatch:
     types: [update-foundry-submodule-docs]

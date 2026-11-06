@@ -31,6 +31,7 @@ If linting errors or warnings occur, run `yarn lint --fix` to attempt to auto-fi
 
 As a contributor, we ask that you fork this repository, work on your own fork and then submit pull requests. The pull requests will be reviewed and eventually merged into the main repo. See ["Fork-a-Repo"](https://help.github.com/articles/fork-a-repo/) for how this works.
 
-### Adding Changesets
-If your PR modifies code under `packages`, you will need to add a changeset to summarize the changes. The PR's `Changeset` GitHub check will give an error if this condition is not satisfied.
-- To add a changeset: from the root directory, run `yarn changeset`
+### Releases (Redbelly fork)
+`@redbellynetwork/hardhat-upgrades` is released from this fork to GitHub Packages, by the `release` workflow; there are no changesets.
+- PRs target `pre-master`. Each carries one label, `release:major`, `release:minor` or `release:patch`, and a merge publishes `X.Y.Z-pre.N` under the `pre` dist-tag, where X.Y.Z is the version the next stable release gets.
+- `pre-master` is promoted to `master` by a merge-commit PR, which publishes `X.Y.Z` under `latest`.

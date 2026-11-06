@@ -1,0 +1,15 @@
+version: "3"
+
+# Run by ci-cd-workflows' release-npm-package workflow (see .github/workflows/release.yaml).
+tasks:
+  build:
+    cmds:
+      - yarn --frozen-lockfile
+      - yarn --cwd packages/plugin-hardhat compile
+  release-package:
+    dir: packages/plugin-hardhat
+    cmds:
+      # The workflow passes the version as vX.Y.Z or vX.Y.Z-pre.N.
+      - npm pkg set version="$(echo '{{.CLI_ARGS}}' | sed 's/^v//')"
+      # The plugin's `prepare` compiles it again; ~/.npmrc maps @redbellynetwork to GitHub Packages.
+      - npm publish
